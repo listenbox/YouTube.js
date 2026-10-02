@@ -351,6 +351,9 @@ export class SuperParsedResult<T extends YTNode = YTNode> {
  * An extended array type that includes additional utility methods for filtering and manipulating YTNode objects.
  */
 export type ObservedArray<T extends YTNode = YTNode> = Array<T> & {
+  /** Whether every input node was retained when this array was parsed. */
+  readonly is_complete: boolean;
+
   /**
    * Returns the first object that matches the specified rule object.
    * @param rule - An object containing properties to match against
@@ -420,10 +423,15 @@ export type ObservedArray<T extends YTNode = YTNode> = Array<T> & {
  * Creates an observed array that provides additional utility methods for array manipulation and filtering.
  * @template T - Type extending YTNode
  * @param obj - Array to be observed
+ * @param is_complete - Whether parsing retained every input node
  */
-export function observe<T extends YTNode>(obj: Array<T>): ObservedArray<T> {
+export function observe<T extends YTNode>(obj: Array<T>, is_complete = true): ObservedArray<T> {
   return new Proxy(obj, {
     get(target, prop) {
+      if (prop == 'is_complete') {
+        return is_complete;
+      }
+
       if (prop == 'get') {
         return (rule: object, del_item?: boolean) => (
           target.find((obj, index) => {
@@ -464,7 +472,7 @@ export function observe<T extends YTNode>(obj: Array<T>): ObservedArray<T> {
         return (...types: YTNodeConstructor<YTNode>[]) => {
           return observe(target.filter((node: YTNode) => {
             return !!node.is(...types);
-          }));
+          }), is_complete);
         };
       }
 
@@ -486,7 +494,7 @@ export function observe<T extends YTNode>(obj: Array<T>): ObservedArray<T> {
             if (node.is(...types))
               return node;
             throw new ParsingError(`Expected node of any type ${types.map((type) => type.type).join(', ')}, got ${(node as YTNode).type}`);
-          }));
+          }), is_complete);
         };
       }
 
