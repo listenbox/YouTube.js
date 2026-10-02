@@ -353,7 +353,7 @@ export function parseResponse<T extends IParsedResponse = IParsedResponse>(data:
   }
 
   const alerts = parseArray(data.alerts, [ Alert, AlertWithButton ]);
-  if (alerts.length) {
+  if (data.alerts) {
     parsed_data.alerts = alerts;
   }
 
@@ -643,9 +643,9 @@ export function parseArray(data?: RawNode[], validTypes?: YTNodeConstructor | YT
       }
     }
 
-    return observe(results);
+    return observe(results, results.length === data.length);
   } else if (!data) {
-    return observe([] as YTNode[]);
+    return observe([] as YTNode[], false);
   }
   throw new ParsingError('Expected array but got a single item');
 }
@@ -672,7 +672,7 @@ export function parse<T extends YTNode = YTNode>(data?: RawData, requireArray?: 
       }
     }
 
-    const res = observe(results);
+    const res = observe(results, results.length === data.length);
 
     return requireArray ? res : new SuperParsedResult(res);
   } else if (requireArray) {

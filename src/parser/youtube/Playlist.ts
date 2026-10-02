@@ -5,7 +5,7 @@ import Alert from '../classes/Alert.js';
 import AvatarStackView from '../classes/AvatarStackView.js';
 import ContinuationItem from '../classes/ContinuationItem.js';
 import ContinuationItemView from '../classes/ContinuationItemView.js';
-import LockupView from '../classes/LockupView.js';
+import ItemSection from '../classes/ItemSection.js';
 import Message from '../classes/Message.js';
 import PlaylistCustomThumbnail from '../classes/PlaylistCustomThumbnail.js';
 import PlaylistHeader from '../classes/PlaylistHeader.js';
@@ -15,11 +15,12 @@ import PlaylistSidebarSecondaryInfo from '../classes/PlaylistSidebarSecondaryInf
 import PlaylistVideo from '../classes/PlaylistVideo.js';
 import PlaylistVideoList from '../classes/PlaylistVideoList.js';
 import PlaylistVideoThumbnail from '../classes/PlaylistVideoThumbnail.js';
-import ReelItem from '../classes/ReelItem.js';
 import SectionList from '../classes/SectionList.js';
-import ShortsLockupView from '../classes/ShortsLockupView.js';
+import TwoColumnBrowseResults from '../classes/TwoColumnBrowseResults.js';
 import VideoOwner from '../classes/VideoOwner.js';
+import AppendContinuationItemsAction from '../classes/actions/AppendContinuationItemsAction.js';
 import ShowEngagementPanelEndpoint from '../classes/endpoints/ShowEngagementPanelEndpoint.js';
+import { ReloadContinuationItemsCommand } from '../continuations.js';
 import { observe, type ObservedArray, type YTNode } from '../helpers.js';
 
 import type { Actions, ApiResponse } from '../../core/index.js';
@@ -32,6 +33,10 @@ export default class Playlist extends Feed<IBrowseResponse> {
   public menu: YTNode;
   public endpoint?: NavigationEndpoint;
   public messages: ObservedArray<Message>;
+
+  readonly #items: YTNode[] = [];
+  readonly #continuations: (ContinuationItem | ContinuationItemView)[] = [];
+  #is_complete = true;
 
   constructor(actions: Actions, data: ApiResponse | IBrowseResponse, already_parsed = false) {
     super(actions, data, already_parsed);
@@ -68,6 +73,7 @@ export default class Playlist extends Feed<IBrowseResponse> {
     this.menu = primary_info?.menu;
     this.endpoint = primary_info?.endpoint;
     this.messages = this.memo.getType(Message);
+    this.#readPlaylistContents();
   }
 
   async getCollaborators(): Promise<IShowEngagementPanelResponse> {
@@ -87,36 +93,27 @@ export default class Playlist extends Feed<IBrowseResponse> {
     throw new InnertubeError(`Unexpected endpoint type. Expected ShowEngagementPanelEndpoint, got ${endpoint.command?.type}`);
   }
 
-  get items(): ObservedArray<LockupView | PlaylistVideo | ReelItem | ShortsLockupView> {
-    return observe(this.videos.as(LockupView, PlaylistVideo, ReelItem, ShortsLockupView).filter((video) => (video as PlaylistVideo).style !== 'PLAYLIST_VIDEO_RENDERER_STYLE_RECOMMENDED_VIDEO'));
+  /** Listing entries in source order, including unsupported nodes. */
+  get items(): ObservedArray<YTNode> {
+    return observe([ ...this.#items ], this.#is_complete);
+  }
+
+  /** Whether listing containers and availability alerts retained every node. */
+  get is_complete(): boolean {
+    return this.#is_complete;
   }
 
   get has_continuation() {
-    const section_list = this.memo.getType(SectionList)[0];
-
-    if (!section_list)
-      return super.has_continuation;
-
-    return !!this.memo.getType(ContinuationItem, ContinuationItemView).find((node) => !section_list.contents.includes(node));
+    return this.#continuations.length > 0;
   }
 
   async getContinuationData(): Promise<IBrowseResponse | undefined> {
-    const section_list = this.memo.getType(SectionList)[0];
-
-    /**
-     * No section list means there can't be additional continuation nodes here,
-     * so no need to check.
-     */
-    if (!section_list)
-      return await super.getContinuationData();
-
-    const playlist_contents_continuation = this.memo.getType(ContinuationItem, ContinuationItemView)
-      .find((node) => !section_list.contents.includes(node));
-
-    if (!playlist_contents_continuation)
+    if (!this.#is_complete)
+      throw new InnertubeError('Playlist listing is incomplete.');
+    const continuation = this.#continuations[0];
+    if (!continuation)
       throw new InnertubeError('There are no continuations.');
-
-    return await playlist_contents_continuation.endpoint.call<IBrowseResponse>(this.actions, { parse: true });
+    return await continuation.endpoint.call<IBrowseResponse>(this.actions, { parse: true });
   }
 
   async getContinuation(): Promise<Playlist> {
@@ -124,6 +121,63 @@ export default class Playlist extends Feed<IBrowseResponse> {
     if (!page)
       throw new InnertubeError('Could not get continuation data');
     return new Playlist(this.actions, page, true);
+  }
+
+  #readPlaylistContents(): void {
+    this.#is_complete &&= this.page.alerts?.is_complete ?? true;
+    const updates = [
+      ...this.page.on_response_received_actions || [],
+      ...this.page.on_response_received_endpoints || []
+    ].filter((node) => node.is(AppendContinuationItemsAction, ReloadContinuationItemsCommand));
+    const root = this.page.contents?.is_node ? this.page.contents.item() : null;
+    if (updates.length) {
+      // Continuation responses can also contain tab chrome without a body.
+      if (updates.length === 1) {
+        this.#readListing(updates[0].contents);
+      } else {
+        this.#is_complete = false;
+      }
+    } else if (root?.is(TwoColumnBrowseResults)) {
+      this.#is_complete &&= root.tabs.is_complete;
+      const tabs = root.tabs.filter((tab) => tab.content);
+      if (tabs.length === 1) {
+        this.#readListing(observe([ tabs[0].content! ]));
+      } else {
+        this.#is_complete = false;
+      }
+    } else if (root) {
+      this.#readListing(observe([ root ]));
+    } else {
+      // A missing listing cannot establish an empty playlist.
+      this.#is_complete = false;
+    }
+    this.#is_complete &&= this.#continuations.length <= 1;
+  }
+
+  #readListing(contents: ObservedArray<YTNode> | null, section_list = false): void {
+    if (!contents) {
+      this.#is_complete = false;
+      return;
+    }
+    this.#is_complete &&= contents.is_complete;
+    for (const node of contents) {
+      if (node.is(SectionList)) {
+        this.#readListing(node.contents, true);
+        // Token-only pagination is not represented by a listing endpoint.
+        this.#is_complete &&= !node.continuation;
+      } else if (node.is(ItemSection)) {
+        this.#readListing(node.contents);
+        this.#is_complete &&= !node.continuation;
+      } else if (node.is(PlaylistVideoList)) {
+        this.#readListing(node.videos);
+      } else if (node.is(ContinuationItem, ContinuationItemView)) {
+        // Direct SectionList continuations fetch recommendations, not members.
+        if (!section_list)
+          this.#continuations.push(node);
+      } else if (!node.is(PlaylistVideo) || node.style !== 'PLAYLIST_VIDEO_RENDERER_STYLE_RECOMMENDED_VIDEO') {
+        this.#items.push(node);
+      }
+    }
   }
 
   #getStat(index: number, primary_info?: PlaylistSidebarPrimaryInfo): string {
