@@ -171,7 +171,7 @@ export default class Playlist extends Feed<IBrowseResponse> {
       } else if (node.is(PlaylistVideoList)) {
         this.#readListing(node.videos);
       } else if (node.is(ContinuationItem, ContinuationItemView)) {
-        // Direct SectionList continuations fetch recommendations, not members.
+        // SectionList siblings are outside the selected member listing.
         if (!section_list)
           this.#continuations.push(node);
       } else if (!node.is(PlaylistVideo) || node.style !== 'PLAYLIST_VIDEO_RENDERER_STYLE_RECOMMENDED_VIDEO') {
