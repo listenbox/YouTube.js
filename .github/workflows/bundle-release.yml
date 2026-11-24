@@ -1,4 +1,4 @@
-name: QuickJS release
+name: Bundle release
 on:
   push:
     branches: [master]
@@ -9,10 +9,10 @@ jobs:
   release:
     if: github.repository == 'listenbox/YouTube.js' && github.ref == 'refs/heads/master'
     concurrency:
-      group: quickjs-release
+      group: bundle-release
       cancel-in-progress: false
     runs-on: ubuntu-24.04
-    environment: quickjs-release
+    environment: bundle-release
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -27,7 +27,7 @@ jobs:
             [tools]
             node = "26.5.0"
             aube = "2.5.1"
-      - name: Sign and publish the next quickjs-v<ABI>.<N> release
+      - name: Sign and publish the next bundle-v<ABI>.<N> release
         env:
-          QUICKJS_SIGNING_SEED: ${{ secrets.QUICKJS_SIGNING_SEED }}
-        run: bash .github/quickjs/release.sh "$GITHUB_SHA"
+          BUNDLE_SIGNING_SEED: ${{ secrets.BUNDLE_SIGNING_SEED }}
+        run: bash .github/bundle/release.sh "$GITHUB_SHA"

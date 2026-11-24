@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Publishes this commit's QuickJS bundle for Listenbox clients as the next
-# immutable release, versioned quickjs-v<ABI>.<N>. Clients verify the
+# Publishes this commit's YouTube.js bundle for Listenbox clients as the next
+# immutable release, versioned bundle-v<ABI>.<N>. Clients verify the
 # Ed25519-signed manifest, its ABI and the bundle digest before evaluating it.
 set -euo pipefail
 
@@ -9,8 +9,8 @@ public_key='AR4hVDIhsP1dYU2UfIviBBrTqr7jmawFksR2bjRUTM4='
 signature_context='listenbox youtubejs release v1'
 repository="${GITHUB_REPOSITORY:?}"
 source_commit="${1:?usage: release.sh <source commit>}"
-abi="$(tr -d '[:space:]' < .github/quickjs/abi)"
-prefix="quickjs-v$abi."
+abi="$(tr -d '[:space:]' < .github/bundle/abi)"
+prefix="bundle-v$abi."
 
 if [[ "$(git rev-parse HEAD)" != "$source_commit" ]]; then
   echo 'Release requires the checked-out source commit.' >&2
@@ -46,16 +46,16 @@ node_modules/.bin/esbuild src/platform/cf-worker.ts \
   --outfile="$work/youtubejs.js"
 
 # The seed becomes a PKCS#8 Ed25519 key that never leaves this job's temp dir.
-seed="$(printf '%s' "${QUICKJS_SIGNING_SEED:?}" | base64 -d | od -An -tx1 -v | tr -d ' \n')"
+seed="$(printf '%s' "${BUNDLE_SIGNING_SEED:?}" | base64 -d | od -An -tx1 -v | tr -d ' \n')"
 if [[ ! "$seed" =~ ^[0-9a-f]{64}$ ]]; then
-  echo 'QUICKJS_SIGNING_SEED must be a base64 Ed25519 seed.' >&2
+  echo 'BUNDLE_SIGNING_SEED must be a base64 Ed25519 seed.' >&2
   exit 1
 fi
 der="302e020100300506032b657004220420$seed"
 printf '%b' "${der//??/\\x&}" > "$work/key.der"
 derived="$(openssl pkey -inform DER -in "$work/key.der" -pubout -outform DER | tail -c 32 | base64 | tr -d '\n')"
 if [[ "$derived" != "$public_key" ]]; then
-  echo 'QUICKJS_SIGNING_SEED does not match the public key clients pin.' >&2
+  echo 'BUNDLE_SIGNING_SEED does not match the public key clients pin.' >&2
   exit 1
 fi
 
@@ -83,7 +83,7 @@ version="$(jq -r .version package.json)"
 # A draft has no tag, so clients never see the tag before both assets exist.
 gh release create "$tag" --repo "$repository" --target "$source_commit" --draft --latest=false \
   --title "$tag: YouTube.js $version (${source_commit:0:7})" \
-  --notes "Signed QuickJS bundle of YouTube.js $version from $source_commit for Listenbox clients with bundle ABI $abi." \
+  --notes "Signed bundle of YouTube.js $version from $source_commit for Listenbox clients with bundle ABI $abi." \
   "$work/youtubejs.js" "$work/youtubejs.json"
 gh release edit "$tag" --repo "$repository" --draft=false --latest=false
 echo "Published $tag"
