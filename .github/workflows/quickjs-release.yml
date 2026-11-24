@@ -1,0 +1,33 @@
+name: QuickJS release
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    if: github.repository == 'listenbox/YouTube.js' && github.ref == 'refs/heads/master'
+    concurrency:
+      group: quickjs-release
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    environment: quickjs-release
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: jdx/mise-action@v5
+        with:
+          version: '2026.11.7'
+          mise_toml: |
+            [tools]
+            node = "26.5.0"
+            aube = "2.5.1"
+      - name: Sign and publish the next quickjs-v<ABI>.<N> release
+        env:
+          QUICKJS_SIGNING_SEED: ${{ secrets.QUICKJS_SIGNING_SEED }}
+        run: bash .github/quickjs/release.sh "$GITHUB_SHA"
